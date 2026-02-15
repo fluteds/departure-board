@@ -1,0 +1,57 @@
+{
+  "stops": [
+    {
+      "id": "NSR:StopPlace:12345",
+      "name": "Tram Stop",
+      "type": "tram",
+      "description": "Main tram stop for departures"
+    },
+    {
+      "id": "NSR:StopPlace:12346",
+      "name": "Bus Stop",
+      "type": "bus",
+      "description": "Main bus stop for departures"
+    }
+  ],
+  "api": {
+    "baseUrl": "https://api.entur.io/journey-planner/v3/graphql",
+    "clientName": "your-app-name",
+    "timeout": 10
+  },
+  "settings": {
+    "numberOfDepartures": 3,
+    "refreshInterval": 30000,
+    "displayFormat": "HHMM",
+    "locale": "no-NO",
+    "timezone": "Europe/Oslo"
+  },
+  "display": {
+    "maxRows": 3,
+    "showRealtime": true,
+    "showDelayIndicator": true,
+    "animateSituations": true,
+    "situationRotateInterval": 5000
+  },
+  "_comments": {
+    "stops": "Array of public transport stops to display. Find stop IDs at https://www.entur.io/",
+    "api": {
+      "baseUrl": "Entur GraphQL API endpoint",
+      "clientName": "Client identifier for API requests",
+      "timeout": "Request timeout in seconds"
+    },
+    "settings": {
+      "numberOfDepartures": "How many departures to fetch per stop",
+      "refreshInterval": "Time between data refreshes in milliseconds (30000 = 30 seconds)",
+      "displayFormat": "Time format: HHMM (15:01) or other formats",
+      "locale": "Locale for date/time formatting",
+      "timezone": "Timezone for display time: Europe/Oslo, UTC, etc. See https://en.wikipedia.org/wiki/List_of_tz_database_time_zones"
+    },
+    "display": {
+      "maxRows": "Maximum departures to show on the display",
+      "showRealtime": "Show real-time status indicator",
+      "showDelayIndicator": "Highlight delayed departures",
+      "animateSituations": "Animate situation messages",
+      "situationRotateInterval": "Milliseconds between situation rotations"
+    }
+  }
+}

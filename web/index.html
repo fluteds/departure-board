@@ -1,0 +1,269 @@
+<!DOCTYPE html>
+<html lang="no">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Departure Board</title>
+    <style>
+        @font-face {
+            font-family: 'Entur-Nationale';
+            src: url('fonts/Entur-Nationale-Medium.woff2') format('woff2');
+            font-style: normal;
+        }
+        body { 
+            font-family: Entur-Nationale, sans-serif;
+            background: #000; 
+            color: white; 
+            text-align: center; 
+        }
+        p { 
+            text-align: left;
+        }
+        .board { 
+            max-width: 256px;  
+            max-height: 60px;
+        }
+        .header {
+            font-family: Entur-Nationale, sans-serif;
+            font-size: 40px;
+            font-weight: 900;
+            text-align: left;
+        }
+        table {
+            width: 100%;
+            text-align: left;
+        }
+        th, td {
+            padding: 10px;
+            border-bottom: 0.5px solid;
+            color: #bbb;
+        }
+        th {
+            font-size: 14px;
+            text-transform: uppercase;
+            border-bottom: 0.5px solid;
+            color: #bbb;
+        }
+        .real-time {
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+            display: inline-block;
+        }
+        .on-time {
+        background: #4caf50;
+        animation: pulse 1.5s infinite;
+        }
+
+        @keyframes pulse {
+        0% {
+            transform: scale(1);
+            opacity: 1;
+        }
+        50% {
+            transform: scale(1.1);
+            opacity: 0.8;
+        }
+        100% {
+            transform: scale(1);
+            opacity: 5;
+        }
+        }
+        .delayed { 
+            color: red; 
+        }
+        .icon {
+            width: 40px;
+            height: 40px;
+            vertical-align: middle;
+            border-radius: 2px;
+        }
+        :root {
+            --bus-color: #ff6392;
+            --tram-color: #b482fb;
+            --background-color: #ffffff
+        }
+        .strikethrough {
+            text-decoration: line-through;
+        }
+        .stop-info {
+            font-size: 12px;
+            color: #bbb;
+        }
+        .situations {
+            color: orange;
+            text-overflow: ellipsis;
+            margin-top: 5px;
+            font-size: 0.8em;
+            display: block;
+        }
+        .situation-icon {
+            display: inline-block;
+            vertical-align: left;
+            margin-right: -5px;
+        }
+        .transport-icon {
+            width: 30px;
+            height: 30px;
+            vertical-align: middle;
+        }
+        .icon {
+            width: 20px;
+            height: 20px;
+            vertical-align: middle;
+        }
+        .destination-column {
+            position: relative;
+        }
+
+    </style>
+</head>
+<body>
+
+<table>
+    <thead>
+            <tr>
+                <th>Type</th>
+                <th>Linje</th>
+                <th>Destinasjon</th>
+                <th>Forventet</th>
+                <th>Om</th>
+            </tr>
+    </thead>
+    <tbody id="departure-list">
+    </tbody>
+</table>
+
+<script>
+    let config = {};
+
+    async function loadConfig() {
+        try {
+            const response = await fetch("../config/config.json");
+            config = await response.json();
+        } catch (error) {
+            console.error("Error loading config:", error);
+        }
+    }
+
+    async function fetchDepartures() {
+        if (!config.stops) await loadConfig();
+
+        const queries = config.stops.map(stop => `{
+            stopPlace(id: "${stop.id}") {
+                name
+                estimatedCalls(numberOfDepartures: ${config.settings.numberOfDepartures}) {
+                    expectedArrivalTime
+                    aimedArrivalTime
+                    realtime
+                    destinationDisplay { frontText }
+                    serviceJourney { line { publicCode, transportMode } }
+                    situations {
+                        description {
+                            value
+                        }
+                    }
+                }
+            }
+        }`);
+
+        try {
+            const fetchPromises = queries.map(query =>
+                fetch(config.api.baseUrl, {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json", "ET-Client-Name": config.api.clientName },
+                    body: JSON.stringify({ query })
+                })
+            );
+
+            const responses = await Promise.all(fetchPromises);
+
+            if (!responses.every(r => r.ok)) throw new Error("Network error");
+
+            const dataArray = await Promise.all(responses.map(r => r.json()));
+
+            if (dataArray.some(d => d.errors)) {
+                console.error("API Errors:", dataArray.find(d => d.errors)?.errors);
+                return;
+            }
+
+            const combinedDepartures = dataArray
+                .flatMap(d => d.data.stopPlace.estimatedCalls)
+                .filter(dep => dep);
+
+            const list = document.getElementById("departure-list");
+            list.innerHTML = "";
+
+            if (combinedDepartures.length === 0) {
+                list.innerHTML = "<tr><td colspan='7' class='text-warning'>No departures found</td></tr>";
+                return;
+            }
+            combinedDepartures.sort((a, b) => new Date(a.expectedArrivalTime) - new Date(b.expectedArrivalTime));
+
+            combinedDepartures.forEach(dep => {
+                const expectedTime = new Date(dep.expectedArrivalTime);
+                const aimedTime = new Date(dep.aimedArrivalTime);
+                const now = new Date();
+                const minutesUntil = Math.round((expectedTime - now) / 60000);
+                const expectedDisplay = (minutesUntil <= 1) ? "Nå" : expectedTime.toLocaleTimeString("no-NO", { hour: "2-digit", minute: "2-digit" });
+                const aimedDisplay = aimedTime.toLocaleTimeString("no-NO", { hour: "2-digit", minute: "2-digit" });
+                const line = dep.serviceJourney.line.publicCode;
+                const destination = dep.destinationDisplay.frontText;
+                const isDelayed = aimedTime > expectedTime;  
+                const mode = dep.serviceJourney.line.transportMode;
+                const realTimeClass = dep.realtime ? "on-time" : "delayed"; 
+
+                const modeIcon = mode === "bus" ? `
+                    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" xml:space="preserve" class="transport-icon" fill="var(--bus-color)" aria-label="bus transport mode"><g fill-rule="evenodd" clip-rule="evenodd"><path d="M10.5 11.8a1 1 0 1 1 1.998.003A1 1 0 0 1 10.5 11.8z"></path><path d="m14.996 9.595-.7-4.296A.353.353 0 0 0 13.95 5H1.7c-.35 0-.7.358-.7.717V10.642c0 .178.128.358.3.358h1.547c.236-.719.906-1.2 1.703-1.2s1.468.481 1.703 1.2h3.544c.236-.719.906-1.2 1.703-1.2s1.467.481 1.703 1.2h1.447c.193 0 .35-.161.35-.358v-.988c0-.02-.002-.04-.004-.06zm-2.84-2.805c0-.198.158-.358.35-.358h1.087a.35.35 0 0 1 .347.311l.185 1.432a.36.36 0 0 1-.085.282.343.343 0 0 1-.262.122h-1.272a.354.354 0 0 1-.35-.358V6.79zm-4.2 0c0-.198.157-.358.35-.358h2.8c.193 0 .35.16.35.358V8.22a.354.354 0 0 1-.35.358h-2.8a.354.354 0 0 1-.35-.358V6.79zm-4.2 0c0-.198.157-.358.35-.358h2.8c.194 0 .351.16.351.358V8.22a.355.355 0 0 1-.35.358h-2.8a.354.354 0 0 1-.35-.358V6.79zm-2.1 0c0-.198.158-.358.35-.358h.701c.193 0 .349.16.349.358V8.22a.353.353 0 0 1-.349.358h-.7a.354.354 0 0 1-.35-.358V6.79z"></path><path d="M3.55 11.8c0-.551.449-1 1-1s1 .449 1 1a1 1 0 0 1-2 0z"></path></g></svg>`
+                    : `
+                    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" xml:space="preserve" class="transport-icon" fill="var(--tram-color)" aria-label="tram transport mode"><path fill-rule="evenodd" clip-rule="evenodd" d="M14.062 5.272a.35.35 0 0 0-.341-.273H8.566l1.289-.89c.1-.075.149-.133.149-.255a.332.332 0 0 0-.142-.276L8.368 2.399h-.964l1.701 1.434-1.7 1.166H2.28a.35.35 0 0 0-.341.273L1.009 9.38a.451.451 0 0 0 .074.35l.812 1.124a.35.35 0 0 0 .283.145h11.643a.35.35 0 0 0 .284-.145l.812-1.123a.451.451 0 0 0 .074-.351l-.929-4.108zM3.75 8.182a.35.35 0 0 1-.35.35H2.35a.35.35 0 0 1-.342-.426l.31-1.4a.35.35 0 0 1 .34-.275H3.4a.35.35 0 0 1 .35.35v1.4zm3.5 0a.35.35 0 0 1-.35.35H4.799a.35.35 0 0 1-.35-.35V6.78a.35.35 0 0 1 .35-.35h2.1a.35.35 0 0 1 .35.35v1.4zm3.51 0a.35.35 0 0 1-.35.35h-2.1a.35.35 0 0 1-.35-.35V6.78a.35.35 0 0 1 .35-.35h2.1a.35.35 0 0 1 .35.35v1.4zm3.073.219a.35.35 0 0 1-.272.131H11.81a.35.35 0 0 1-.35-.35V6.781a.35.35 0 0 1 .35-.35H13.251a.35.35 0 0 1 .342.275l.309 1.4a.347.347 0 0 1-.07.295zM2 11.999h12v1H2z"></path></svg>`;
+
+                let situationHTML = '';
+                if (dep.situations && dep.situations.length > 0) {
+                    // Extract the situation descriptions into an array
+                    let situations = dep.situations.map(situation => situation.description[0].value);
+                    let currentSituationIndex = 0;
+
+                    // Rotate situations every 8 seconds
+                    setInterval(function() {
+                        situationHTML = `
+                            <span class="situation-icon">
+                                <svg xmlns="http://www.w3.org/2000/svg" class="icon" fill="orange" aria-label="warning">
+                                    <path fill-rule="evenodd" clip-rule="evenodd" d="M8 1C4.1 1 1 4.1 1 8s3.1 7 7 7 7-3.1 7-7-3.1-7-7-7zm-.7 3h1.4v5.1H7.3V4zm.7 8.2c-.5 0-.9-.4-.9-.9s.4-.9.9-.9.9.4.9.9c0 .6-.4.9-.9.9z"></path>
+                                </svg>
+                            </span>
+                            ${situations[currentSituationIndex]}`;
+                        currentSituationIndex = (currentSituationIndex + 1) % situations.length;
+                        document.getElementById("situation-display").innerHTML = situationHTML;
+                    }, 5000);
+                }
+
+                list.innerHTML += `
+                    <tr>
+                        <td>${modeIcon}</td>
+                        <td>${line}</td>
+                        <td class="destination-column">
+                            ${destination}
+                            <div id="situation-display" class="situations"></div>
+                        </td>
+                        <td class="${isDelayed ? 'delayed' : ''}">
+                            ${isDelayed ? `<span class="strikethrough">${expectedDisplay}</span> ${aimedDisplay}` : expectedDisplay}
+                            <div>${minutesUntil} min</div>
+                        </td>
+                        <td><span class="real-time ${realTimeClass}"></span></td>
+                    </tr>`;
+            });
+
+        } catch (error) {
+            console.error("Error fetching data:", error);
+            document.getElementById("departure-list").innerHTML = "<tr><td colspan='7' class='text-warning'>Error loading departures</td></tr>";
+        }
+    }
+    loadConfig().then(() => {
+        fetchDepartures();
+        setInterval(fetchDepartures, config.settings?.refreshInterval || 30000);
+    });
+</script>
+
+</body>
+</html>
